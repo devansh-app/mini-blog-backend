@@ -1,0 +1,219 @@
+from flask import request, jsonify
+from flask_jwt_extended import create_access_token, create_refresh_token, jwt_required, get_jwt_identity
+from app.auth import auth
+from app.models import User
+from app import db
+import secrets
+import string
+
+password_reset_tokens = {}
+
+def generate_reset_token():
+    """Generate a secure random token for password reset"""
+    return ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+
+@auth.route('/register', methods=['POST'])
+def register():
+    """Register a new user"""
+    try:
+        data = request.get_json()
+        
+      
+        if not data or not all(k in data for k in ['username', 'email', 'password']):
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        username = data['username']
+        email = data['email']
+        password = data['password']
+        
+  
+        if len(username) < 3 or len(username) > 20:
+            return jsonify({'error': 'Username must be between 3 and 20 characters'}), 400
+        
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        
+   
+        if User.query.filter_by(username=username).first():
+            return jsonify({'error': 'Username already taken'}), 409
+        
+        if User.query.filter_by(email=email).first():
+            return jsonify({'error': 'Email already registered'}), 409
+        
+        
+        user = User(username=username, email=email)
+        user.set_password(password)
+        
+        db.session.add(user)
+        db.session.commit()
+        
+      
+        access_token = create_access_token(identity=user.id)
+        refresh_token = create_refresh_token(identity=user.id)
+        
+        return jsonify({
+            'message': 'User registered successfully',
+            'user': user.to_dict(),
+            'access_token': access_token,
+            'refresh_token': refresh_token
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Registration failed'}), 500
+
+@auth.route('/login', methods=['POST'])
+def login():
+    """Login user and return JWT tokens"""
+    try:
+        data = request.get_json()
+        
+      
+        if not data or not all(k in data for k in ['username', 'password']):
+            return jsonify({'error': 'Missing username or password'}), 400
+        
+        username = data['username']
+        password = data['password']
+        
+    
+        user = User.query.filter_by(username=username).first()
+        
+
+        if not user or not user.check_password(password):
+            return jsonify({'error': 'Invalid username or password'}), 401
+        
+        # Create tokens
+        access_token = create_access_token(identity=user.id)
+        refresh_token = create_refresh_token(identity=user.id)
+        
+        return jsonify({
+            'message': 'Login successful',
+            'user': user.to_dict(),
+            'access_token': access_token,
+            'refresh_token': refresh_token
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Login failed'}), 500
+
+@auth.route('/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def refresh():
+    """Refresh access token"""
+    try:
+        current_user_id = get_jwt_identity()
+        new_access_token = create_access_token(identity=current_user_id)
+        
+        return jsonify({
+            'access_token': new_access_token
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Token refresh failed'}), 500
+
+@auth.route('/profile', methods=['GET'])
+@jwt_required()
+def profile():
+    """Get current user profile"""
+    try:
+        current_user_id = get_jwt_identity()
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        return jsonify({
+            'user': user.to_dict()
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get profile'}), 500
+
+@auth.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    """Send password reset email (simulated)"""
+    try:
+        data = request.get_json()
+        
+        if not data or 'email' not in data:
+            return jsonify({'error': 'Email is required'}), 400
+        
+        email = data['email']
+        
+
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+  
+            return jsonify({'message': 'If the email exists, a reset link has been sent'}), 200
+        
+        # Generate reset token
+        reset_token = generate_reset_token()
+        
+
+        password_reset_tokens[reset_token] = {
+            'user_id': user.id,
+            'email': email
+        }
+        
+
+        reset_link = f"/auth/reset-password?token={reset_token}"
+        
+        return jsonify({
+            'message': 'Password reset link sent to your email',
+            'reset_link': reset_link  
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to process password reset request'}), 500
+
+@auth.route('/reset-password', methods=['POST'])
+def reset_password():
+    """Reset password using token"""
+    try:
+        data = request.get_json()
+        
+        if not data or not all(k in data for k in ['token', 'password']):
+            return jsonify({'error': 'Token and new password are required'}), 400
+        
+        token = data['token']
+        new_password = data['password']
+        
+       
+        if len(new_password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        
+  
+        if token not in password_reset_tokens:
+            return jsonify({'error': 'Invalid or expired reset token'}), 400
+        
+        token_data = password_reset_tokens[token]
+        user_id = token_data['user_id']
+        
+    
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+      
+        user.set_password(new_password)
+        db.session.commit()
+        
+    
+        del password_reset_tokens[token]
+        
+        return jsonify({
+            'message': 'Password reset successfully'
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to reset password'}), 500
+
+@auth.route('/logout', methods=['POST'])
+@jwt_required()
+def logout():
+    """Logout user (client should discard tokens)"""
+
+    return jsonify({
+        'message': 'Logged out successfully'
+    }), 200
