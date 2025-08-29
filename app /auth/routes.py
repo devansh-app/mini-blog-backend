@@ -29,6 +29,14 @@ def invalid_token_callback(err):
 def unauthorized_callback(err):
     return jsonify({"error": "Missing or invalid Authorization header", "details": err}), 401
 
+@auth.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for Render"""
+    return jsonify({
+        'status': 'healthy',
+        'message': 'Flask Blog API is running'
+    }), 200
+
 
 
 @auth.route('/register', methods=['POST'])
@@ -229,3 +237,172 @@ def logout():
 
     except Exception as e:
         return jsonify({'error': 'Logout failed', 'details': str(e)}), 500
+
+
+@auth.route('/update-profile', methods=['PUT'])
+@jwt_required()
+def update_profile():
+    """Update user profile information"""
+    try:
+        current_user_id = get_jwt_identity()
+        if not current_user_id:
+            return jsonify({'error': 'Invalid token'}), 401
+
+        try:
+            user_id = int(current_user_id)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid user ID in token'}), 401
+
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        # Update username if provided
+        if 'username' in data:
+            new_username = data['username'].strip()
+            if len(new_username) < 3 or len(new_username) > 20:
+                return jsonify({'error': 'Username must be between 3 and 20 characters'}), 400
+            
+            # Check if username is already taken by another user
+            existing_user = User.query.filter_by(username=new_username).first()
+            if existing_user and existing_user.id != user_id:
+                return jsonify({'error': 'Username already taken'}), 409
+            
+            user.username = new_username
+
+        # Update email if provided
+        if 'email' in data:
+            new_email = data['email'].strip()
+            if not new_email or '@' not in new_email:
+                return jsonify({'error': 'Invalid email format'}), 400
+            
+            # Check if email is already taken by another user
+            existing_user = User.query.filter_by(email=new_email).first()
+            if existing_user and existing_user.id != user_id:
+                return jsonify({'error': 'Email already registered'}), 409
+            
+            user.email = new_email
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Profile updated successfully',
+            'user': user.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update profile', 'details': str(e)}), 500
+
+
+@auth.route('/change-password', methods=['POST'])
+@jwt_required()
+def change_password():
+    """Change user password"""
+    try:
+        current_user_id = get_jwt_identity()
+        if not current_user_id:
+            return jsonify({'error': 'Invalid token'}), 401
+
+        try:
+            user_id = int(current_user_id)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid user ID in token'}), 401
+
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        data = request.get_json()
+        if not data or not all(k in data for k in ['current_password', 'new_password']):
+            return jsonify({'error': 'Current password and new password are required'}), 400
+
+        current_password = data['current_password']
+        new_password = data['new_password']
+
+        # Verify current password
+        if not user.check_password(current_password):
+            return jsonify({'error': 'Current password is incorrect'}), 401
+
+        # Validate new password
+        if len(new_password) < 6:
+            return jsonify({'error': 'New password must be at least 6 characters'}), 400
+
+        # Check if new password is same as current
+        if user.check_password(new_password):
+            return jsonify({'error': 'New password must be different from current password'}), 400
+
+        # Update password
+        user.set_password(new_password)
+        db.session.commit()
+
+        return jsonify({'message': 'Password changed successfully'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to change password', 'details': str(e)}), 500
+
+
+@auth.route('/my-posts', methods=['GET'])
+@jwt_required()
+def get_my_posts():
+    """Get posts by current user with pagination"""
+    try:
+        current_user_id = get_jwt_identity()
+        if not current_user_id:
+            return jsonify({'error': 'Invalid token'}), 401
+
+        try:
+            user_id = int(current_user_id)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid user ID in token'}), 401
+
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if per_page < 1 or per_page > 50:
+            per_page = 10
+
+        # Import Post model here to avoid circular imports
+        from app.models import Post
+        
+        # Get posts by current user
+        posts_query = Post.query.filter_by(user_id=user_id).order_by(Post.created_at.desc())
+        
+        # Apply pagination
+        pagination = posts_query.paginate(
+            page=page, 
+            per_page=per_page, 
+            error_out=False
+        )
+        
+        posts = pagination.items
+        
+        # Convert posts to dictionary format
+        posts_data = []
+        for post in posts:
+            post_dict = post.to_dict()
+            posts_data.append(post_dict)
+
+        return jsonify({
+            'posts': posts_data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': pagination.total,
+                'pages': pagination.pages,
+                'has_next': pagination.has_next,
+                'has_prev': pagination.has_prev
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': 'Failed to get posts', 'details': str(e)}), 500

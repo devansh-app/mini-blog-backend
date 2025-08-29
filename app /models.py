@@ -6,7 +6,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128))
+    password_hash = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -67,7 +67,8 @@ class Post(db.Model):
             'user_id': self.user_id,
             'author': self.author.to_dict() if self.author else None,
             'likes_count': len(self.likes),
-            'likes': [like.to_dict() for like in self.likes]
+            'likes': [like.to_dict() for like in self.likes],
+            'comments_count': len(self.comments)
         }
     
     def __repr__(self):
