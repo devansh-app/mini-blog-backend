@@ -18,20 +18,20 @@ class S3Service:
     def generate_presigned_url(self, file_extension, content_type, expires_in=3600):
       
         try:
-            # Normalize file extension and content type
+            # Normalize the file 
             file_extension = file_extension.lower().strip()
             content_type = content_type.lower().strip()
             
-            # Validate file extension and content type match
+            # to validate the content type
             if not self._validate_extension_content_type_match(file_extension, content_type):
                 raise Exception(f"File extension '{file_extension}' does not match content type '{content_type}'")
             
-            # Generate unique file key
+            # generate a timestamp
             timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
             unique_id = str(uuid.uuid4())[:8]
             file_key = f"posts/{timestamp}_{unique_id}.{file_extension}"
             
-            # Log the parameters for debugging
+         
             current_app.logger.info(f"Generating presigned URL - Extension: {file_extension}, Content-Type: {content_type}, File-Key: {file_key}")
             
             # Generate presigned URL without ACL to avoid signature issues

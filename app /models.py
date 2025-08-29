@@ -35,8 +35,8 @@ class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=False)
-    image_path = db.Column(db.String(255))  # Optional image (legacy field)
-    s3_file_key = db.Column(db.String(500))  # S3 file key for images
+    image_path = db.Column(db.String(255)) 
+    s3_file_key = db.Column(db.String(500))  # S3 file 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -46,7 +46,7 @@ class Post(db.Model):
     likes = db.relationship('Like', backref='post', lazy=True, cascade='all, delete-orphan')
     
     def to_dict(self):
-        # Get image URL from S3 if available, otherwise use legacy image_path
+        # Get image URL from S3
         image_url = None
         if self.s3_file_key:
             from app.s3_service import S3Service
@@ -98,7 +98,7 @@ class Comment(db.Model):
             'replies_count': len(self.replies) if self.replies else 0
         }
         
-        # Include replies if requested and within depth limit
+        # Include replies 
         if include_replies and self.replies and current_depth < max_depth:
             comment_dict['replies'] = [
                 reply.to_dict(include_replies=True, max_depth=max_depth, current_depth=current_depth + 1)
